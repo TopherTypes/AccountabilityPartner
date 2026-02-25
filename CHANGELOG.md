@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented in this file.
 
+## [v0.4.0] - 2026-02-25
+### Added
+- Added a top-level **Settings** modal with tabbed **General settings** and **Metric settings** panels.
+- Added a full metric editor workflow for creating/editing/removing metrics with fields for metric ID, name, type, grouping, unit, aggregation, effective-from, and removal date.
+- Added user-help affordances for metric configuration via `?` help badges with tooltips on **Type of metric** and **Aggregation**.
+
+### Changed
+- Moved metric management out of the main page card into the Settings modal experience.
+- Replaced prompt-based metric edits with structured editor-driven actions and table load/remove controls.
+- Enforced forward-only metric updates/removals (today and future dates only) to preserve historical immutability guarantees.
+- Updated metric type and aggregation option labels to be human-readable while preserving canonical stored values.
+
 ## [v0.3.0] - 2026-02-25
 ### Added
 - Added v3 export metadata for day/week/all payloads with metric-definition snapshots/references to preserve metric meaning offline.

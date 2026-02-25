@@ -12,7 +12,7 @@
     h2 { font-size: 16px; margin: 0 0 10px; }
     h3 { font-size: 14px; margin: 0 0 8px; opacity: .9; }
     label { display: block; font-size: 13px; opacity: .9; margin: 10px 0 6px; }
-    input[type="number"], input[type="text"], input[type="date"], textarea {
+    input[type="number"], input[type="text"], input[type="date"], select, textarea {
       width: 100%; padding: 10px 12px; border-radius: 10px;
       border: 1px solid #2a3246; background: #0f1320; color: #e9eef7;
       box-sizing: border-box;
@@ -56,3 +56,65 @@
     .dashS { font-size: 12px; opacity: .85; margin-top: 6px; }
     input[type="file"] { color: #e9eef7; }
     .twoCols { display: grid; grid-template-columns: 1.2fr .8fr; gap: 12px; }
+    .hidden { display: none; }
+    .settingsHeader { align-items: start; }
+    .settingsButtonWrap { display: flex; justify-content: flex-end; align-items: start; }
+
+    .settingsModal {
+      width: min(1000px, calc(100vw - 24px));
+      border: none;
+      border-radius: 12px;
+      padding: 0;
+      background: transparent;
+      color: inherit;
+    }
+    .settingsModal::backdrop { background: rgba(0, 0, 0, 0.65); }
+    .settingsModalCard {
+      margin: 0;
+      background: #141824;
+      border: 1px solid #252b3a;
+      border-radius: 12px;
+      padding: 16px;
+    }
+    .settingsTopBar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+    .settingsTabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .tabBtn.active {
+      background: #2a355f;
+      border-color: #3d4d85;
+    }
+    .settingsPanel {
+      border: 1px solid #252b3a;
+      border-radius: 10px;
+      padding: 12px;
+      background: #0f1320;
+    }
+
+    .helpBadge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      margin-left: 6px;
+      width: 16px;
+      height: 16px;
+      border-radius: 999px;
+      border: 1px solid #3d4d85;
+      background: #1b2240;
+      color: #e9eef7;
+      font-size: 11px;
+      font-weight: 700;
+      cursor: help;
+      vertical-align: middle;
+    }
+    .helpBadge:focus-visible {
+      outline: 2px solid #6f86d6;
+      outline-offset: 2px;
+    }
