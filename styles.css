@@ -97,3 +97,24 @@
       padding: 12px;
       background: #0f1320;
     }
+
+    .helpBadge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      margin-left: 6px;
+      width: 16px;
+      height: 16px;
+      border-radius: 999px;
+      border: 1px solid #3d4d85;
+      background: #1b2240;
+      color: #e9eef7;
+      font-size: 11px;
+      font-weight: 700;
+      cursor: help;
+      vertical-align: middle;
+    }
+    .helpBadge:focus-visible {
+      outline: 2px solid #6f86d6;
+      outline-offset: 2px;
+    }

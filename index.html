@@ -222,7 +222,7 @@
             <input id="metricLabelInput" type="text" placeholder="Human-readable metric name" />
           </div>
           <div>
-            <label for="metricTypeInput">Type of metric</label>
+            <label for="metricTypeInput">Type of metric <span class="helpBadge" tabindex="0" role="img" aria-label="Metric type help" title="Defines what kind of value is captured each day. Options: Whole number, Decimal number, Yes/No, Positive/Negative, Short text, Long text, Single choice, Multiple choice.">?</span></label>
             <select id="metricTypeInput"></select>
           </div>
         </div>
@@ -238,14 +238,14 @@
             <input id="metricUnitInput" type="text" placeholder="e.g., hours, sessions" />
           </div>
           <div>
-            <label for="metricAggregationInput">Aggregation</label>
+            <label for="metricAggregationInput">Aggregation <span class="helpBadge" tabindex="0" role="img" aria-label="Aggregation help" title="Defines how weekly summaries combine daily values. Options: Average, Sum, Count yes/true days, Count selected options, Latest value, Do not aggregate.">?</span></label>
             <select id="metricAggregationInput">
-              <option value="average">average</option>
-              <option value="sum">sum</option>
-              <option value="count_true">count_true</option>
-              <option value="count_selected">count_selected</option>
-              <option value="latest">latest</option>
-              <option value="none">none</option>
+              <option value="average">Average</option>
+              <option value="sum">Sum</option>
+              <option value="count_true">Count Yes/True Days</option>
+              <option value="count_selected">Count Selected Options</option>
+              <option value="latest">Latest Value</option>
+              <option value="none">Do Not Aggregate</option>
             </select>
           </div>
         </div>

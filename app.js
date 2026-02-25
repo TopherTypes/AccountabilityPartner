@@ -49,6 +49,26 @@
     avg: "average"
   });
 
+  const METRIC_TYPE_META = Object.freeze({
+    [METRIC_TYPES.NUMBER_INT]: { label: "Whole number", description: "Integer values (for example: sessions completed)." },
+    [METRIC_TYPES.NUMBER_FLOAT]: { label: "Decimal number", description: "Numeric values with decimals (for example: 7.5 hours)." },
+    [METRIC_TYPES.BINARY_YES_NO]: { label: "Yes / No", description: "True/false value shown as Yes or No." },
+    [METRIC_TYPES.BINARY_POS_NEG]: { label: "Positive / Negative", description: "True/false value shown as Positive or Negative." },
+    [METRIC_TYPES.TEXT_SHORT]: { label: "Short text", description: "Single-line text input for concise notes." },
+    [METRIC_TYPES.TEXT_LONG]: { label: "Long text", description: "Multi-line text area for detailed notes." },
+    [METRIC_TYPES.SELECT_SINGLE]: { label: "Single choice", description: "Choose one option from a predefined list." },
+    [METRIC_TYPES.SELECT_MULTI]: { label: "Multiple choice", description: "Choose multiple options from a predefined list." }
+  });
+
+  const AGGREGATION_META = Object.freeze({
+    average: { label: "Average", description: "Computes the mean value across days in the week." },
+    sum: { label: "Sum", description: "Adds values across days in the week." },
+    count_true: { label: "Count Yes/True Days", description: "Counts days where the metric is true/Yes." },
+    count_selected: { label: "Count Selected Options", description: "Counts selected choices for multi-select metrics." },
+    latest: { label: "Latest Value", description: "Shows the most recent value in the week." },
+    none: { label: "Do Not Aggregate", description: "Skips weekly aggregation for this metric." }
+  });
+
   const LEGACY_DAY_V2_TO_METRIC_ID = Object.freeze({
     "reflection.one_sentence": "one_sentence",
     "physiology.sleep_hours": "sleep_hours",
@@ -1106,14 +1126,34 @@
     return toISODate(d);
   }
 
+  /**
+   * Render type choices using user-friendly labels while preserving canonical serialized values.
+   */
   function populateMetricTypeOptions() {
     if (!els.metricTypeInput) return;
     els.metricTypeInput.innerHTML = "";
     Object.values(METRIC_TYPES).forEach((type) => {
       const option = document.createElement("option");
       option.value = type;
-      option.textContent = type;
+      option.textContent = METRIC_TYPE_META[type]?.label || type;
+      option.title = METRIC_TYPE_META[type]?.description || "";
       els.metricTypeInput.appendChild(option);
+    });
+  }
+
+  /**
+   * Render aggregation choices with clear labels while persisting canonical aggregation IDs.
+   */
+  function populateAggregationOptions() {
+    if (!els.metricAggregationInput) return;
+    const orderedAggregationKeys = ["average", "sum", "count_true", "count_selected", "latest", "none"];
+    els.metricAggregationInput.innerHTML = "";
+    orderedAggregationKeys.forEach((aggregationKey) => {
+      const option = document.createElement("option");
+      option.value = aggregationKey;
+      option.textContent = AGGREGATION_META[aggregationKey]?.label || aggregationKey;
+      option.title = AGGREGATION_META[aggregationKey]?.description || "";
+      els.metricAggregationInput.appendChild(option);
     });
   }
 
@@ -1688,6 +1728,7 @@
   setDaySavedPill(false);
 
   populateMetricTypeOptions();
+  populateAggregationOptions();
   clearMetricEditor();
   setSettingsTab("general");
   renderMetricFields(todayISO);
