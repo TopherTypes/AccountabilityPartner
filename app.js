@@ -42,6 +42,9 @@
     dashStructS: $("dashStructS"),
     dashDays: $("dashDays"),
 
+    metricEffectiveDate: $("metricEffectiveDate"),
+    metricsTable: $("metricsTable")?.querySelector("tbody"),
+
     weekDaysTable: $("weekDaysTable").querySelector("tbody"),
     weeksTable: $("weeksTable").querySelector("tbody"),
   };
@@ -253,7 +256,9 @@
     try {
       const parsed = JSON.parse(localStorage.getItem(METRIC_DEFINITIONS_KEY));
       if (parsed?.version === METRIC_DEFINITIONS_VERSION && Array.isArray(parsed?.definitions)) {
-        return parsed.definitions;
+        const normalized = normalizeMetricDefinitions(parsed.definitions);
+        if (normalized.changed) persistMetricDefinitions(normalized.definitions);
+        return normalized.definitions;
       }
     } catch {
       // noop: fallback to defaults
@@ -268,14 +273,66 @@
     return seeded;
   }
 
+  function persistMetricDefinitions(definitions) {
+    localStorage.setItem(METRIC_DEFINITIONS_KEY, JSON.stringify({
+      version: METRIC_DEFINITIONS_VERSION,
+      definitions,
+      updated_at_iso: new Date().toISOString()
+    }));
+  }
+
+  function normalizeMetricDefinitions(definitions) {
+    let changed = false;
+    const normalized = definitions.map((def) => {
+      const next = { ...def };
+      if (!next.active_from) {
+        next.active_from = "2024-01-01";
+        changed = true;
+      }
+      if (!Object.prototype.hasOwnProperty.call(next, "active_to")) {
+        next.active_to = null;
+        changed = true;
+      }
+      return next;
+    });
+    return { definitions: normalized, changed };
+  }
+
   function isMetricActiveOnDate(definition, dayISO) {
     const starts = !definition.active_from || definition.active_from <= dayISO;
     const ends = !definition.active_to || definition.active_to >= dayISO;
     return starts && ends;
   }
 
+  /**
+   * Historical immutability rules for metric definitions:
+   * - We never overwrite old definition rows; edits append a new row with a later active_from.
+   * - Each row represents a validity window [active_from, active_to].
+   * - For any metric/day pair we resolve exactly one effective row: the active row with the latest active_from.
+   * This guarantees old days render/aggregate against the definition that existed on that day.
+   */
   function getDefinitionsForDay(dayISO) {
-    return metricDefinitions.filter((def) => isMetricActiveOnDate(def, dayISO));
+    const latestByMetric = new Map();
+    for (const def of metricDefinitions) {
+      if (!isMetricActiveOnDate(def, dayISO)) continue;
+      const current = latestByMetric.get(def.metric_id);
+      if (!current || def.active_from > current.active_from) {
+        latestByMetric.set(def.metric_id, def);
+      }
+    }
+
+    return Array.from(latestByMetric.values()).sort((a, b) => {
+      const g = String(a.group || "").localeCompare(String(b.group || ""));
+      if (g !== 0) return g;
+      return a.metric_id.localeCompare(b.metric_id);
+    });
+  }
+
+  function getDefinitionForMetricOnDate(metricId, dayISO) {
+    const defs = metricDefinitions
+      .filter((def) => def.metric_id === metricId && isMetricActiveOnDate(def, dayISO))
+      .sort((a, b) => b.active_from.localeCompare(a.active_from));
+    return defs[0] || null;
   }
 
   function getMetricValue(entry, metricId, fallback = null) {
@@ -387,20 +444,31 @@
       d.setDate(monday.getDate() + i);
       const iso = toISODate(d);
       const entry = store.days[iso];
-      if (entry) days.push(entry);
+      if (entry) days.push({ iso, entry });
     }
 
-    const sleepVals = days.map((d) => getMetricValue(d, "sleep_hours", null)).filter((v) => v !== null && v !== undefined);
-    const caffVals = days.map((d) => getMetricValue(d, "caffeine_drinks", null)).filter((v) => v !== null && v !== undefined);
+    // Weekly summaries are date-resolved per day so historical totals don't drift when definitions change later.
+    const metricValueIfActive = (dayObj, metricId, fallback) => {
+      const effectiveDef = getDefinitionForMetricOnDate(metricId, dayObj.iso);
+      if (!effectiveDef) return fallback;
+      return getMetricValue(dayObj.entry, metricId, fallback);
+    };
+
+    const sleepVals = days
+      .map((d) => metricValueIfActive(d, "sleep_hours", null))
+      .filter((v) => v !== null && v !== undefined);
+    const caffVals = days
+      .map((d) => metricValueIfActive(d, "caffeine_drinks", null))
+      .filter((v) => v !== null && v !== undefined);
 
     const avg = (arr) => arr.length ? (arr.reduce((a, b) => a + b, 0) / arr.length) : null;
     const sum = (arr) => arr.reduce((a, b) => a + b, 0);
 
-    const sugarDays = days.filter((d) => !!getMetricValue(d, "sugar_binge", false)).length;
-    const moveDays = days.filter((d) => !!getMetricValue(d, "movement_20m", false)).length;
+    const sugarDays = days.filter((d) => !!metricValueIfActive(d, "sugar_binge", false)).length;
+    const moveDays = days.filter((d) => !!metricValueIfActive(d, "movement_20m", false)).length;
 
-    const dwTechTotal = sum(days.map((d) => getMetricValue(d, "deep_work_tech", 0) ?? 0));
-    const dwCreatTotal = sum(days.map((d) => getMetricValue(d, "deep_work_creative", 0) ?? 0));
+    const dwTechTotal = sum(days.map((d) => metricValueIfActive(d, "deep_work_tech", 0) ?? 0));
+    const dwCreatTotal = sum(days.map((d) => metricValueIfActive(d, "deep_work_creative", 0) ?? 0));
 
     const weekStruct = store.weeks[weekMondayISO]?.structure ?? {
       priorities_defined: false,
@@ -437,7 +505,8 @@
       },
       days: days
         .slice()
-        .sort((a, b) => (a.day.iso_date).localeCompare(b.day.iso_date)),
+        .sort((a, b) => (a.entry.day.iso_date).localeCompare(b.entry.day.iso_date))
+        .map((d) => d.entry),
       meta: {
         exported_at_iso: new Date().toISOString()
       }
@@ -647,6 +716,7 @@
     const dayISO = els.dayDate.value;
     if (!dayISO) return;
 
+    // Load is date-aware: the selected day must render only the definition versions effective on that day.
     renderMetricFields(dayISO);
 
     const entry = store.days[dayISO];
@@ -668,6 +738,75 @@
     els.weeklyReviewDone.checked = !!st.weekly_review_done;
 
     renderWeekDashboard(store, weekMondayISO);
+    renderMetricManagementTable();
+  }
+
+  function shiftISODate(dayISO, deltaDays) {
+    const d = parseISODate(dayISO);
+    d.setDate(d.getDate() + deltaDays);
+    return toISODate(d);
+  }
+
+  function renderMetricManagementTable() {
+    if (!els.metricsTable) return;
+    els.metricsTable.innerHTML = "";
+
+    const defs = [...metricDefinitions].sort((a, b) => {
+      const idCmp = a.metric_id.localeCompare(b.metric_id);
+      if (idCmp !== 0) return idCmp;
+      return b.active_from.localeCompare(a.active_from);
+    });
+
+    defs.forEach((def) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${escapeHtml(def.metric_id)}</td>
+        <td>${escapeHtml(def.label)}</td>
+        <td>${escapeHtml(def.type)}</td>
+        <td>${escapeHtml(def.group || "—")}</td>
+        <td>${escapeHtml(def.active_from || "—")}</td>
+        <td>${escapeHtml(def.active_to || "—")}</td>
+        <td class="right">
+          <button class="ghost" data-edit="${escapeHtml(def.metric_id)}" data-from="${escapeHtml(def.active_from || "")}">Edit</button>
+          <button class="ghost" data-retire="${escapeHtml(def.metric_id)}" data-from="${escapeHtml(def.active_from || "")}">Remove</button>
+        </td>
+      `;
+      els.metricsTable.appendChild(tr);
+    });
+  }
+
+  function saveMetricDefinitionVersion(definition, effectiveFromISO) {
+    const updatedDefs = metricDefinitions.map((row) => ({ ...row }));
+    const previous = updatedDefs
+      .filter((row) => row.metric_id === definition.metric_id && !row.active_to)
+      .sort((a, b) => b.active_from.localeCompare(a.active_from))[0];
+
+    if (previous) {
+      previous.active_to = shiftISODate(effectiveFromISO, -1);
+    }
+
+    updatedDefs.push({
+      ...definition,
+      active_from: effectiveFromISO,
+      active_to: null
+    });
+
+    metricDefinitions = updatedDefs;
+    persistMetricDefinitions(metricDefinitions);
+  }
+
+  function retireMetricDefinition(metricId, retireISO) {
+    const updatedDefs = metricDefinitions.map((row) => ({ ...row }));
+    const current = updatedDefs
+      .filter((row) => row.metric_id === metricId && !row.active_to && row.active_from <= retireISO)
+      .sort((a, b) => b.active_from.localeCompare(a.active_from))[0];
+    if (!current) return false;
+
+    // Soft-retire keeps the row for audit/history and closes its validity window at retire date.
+    current.active_to = retireISO;
+    metricDefinitions = updatedDefs;
+    persistMetricDefinitions(metricDefinitions);
+    return true;
   }
 
   function setStructureFromCheckboxes(store, weekMondayISO) {
@@ -869,12 +1008,50 @@
     }
   });
 
+  els.metricEffectiveDate?.addEventListener("change", () => {
+    renderMetricManagementTable();
+  });
+
+  els.metricsTable?.addEventListener("click", (evt) => {
+    const editBtn = evt.target.closest("button[data-edit]");
+    if (editBtn) {
+      const metricId = editBtn.getAttribute("data-edit");
+      const fromISO = editBtn.getAttribute("data-from");
+      const base = metricDefinitions.find((def) => def.metric_id === metricId && def.active_from === fromISO);
+      if (!base) return;
+
+      const newLabel = window.prompt(`New label for ${metricId}`, base.label);
+      if (newLabel == null) return;
+
+      const effectiveFromISO = els.metricEffectiveDate?.value || els.dayDate.value || currentDayISO();
+      saveMetricDefinitionVersion({ ...base, label: newLabel.trim() || base.label }, effectiveFromISO);
+      loadDayIntoForm();
+      setStatus(`Created new version for ${metricId} effective ${effectiveFromISO}.`);
+      return;
+    }
+
+    const retireBtn = evt.target.closest("button[data-retire]");
+    if (retireBtn) {
+      const metricId = retireBtn.getAttribute("data-retire");
+      const retireISO = els.metricEffectiveDate?.value || els.dayDate.value || currentDayISO();
+      const ok = retireMetricDefinition(metricId, retireISO);
+      if (!ok) {
+        setStatus(`No active version found for ${metricId} on ${retireISO}.`);
+        return;
+      }
+      loadDayIntoForm();
+      setStatus(`Retired ${metricId} as of ${retireISO}.`);
+    }
+  });
+
   // --- Init ---
   const todayISO = currentDayISO();
   els.dayDate.value = todayISO;
+  if (els.metricEffectiveDate) els.metricEffectiveDate.value = todayISO;
   setDaySavedPill(false);
 
   renderMetricFields(todayISO);
+  renderMetricManagementTable();
   loadDayIntoForm();
   setStatus(`Ready. Log today (${todayISO}) and hit Save day.`);
 })();
