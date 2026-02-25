@@ -7,6 +7,11 @@
   const STORAGE_KEY = "accountability_daily_scorecard_v1";
   const METRIC_DEFINITIONS_KEY = "store.metric_definitions";
   const METRIC_DEFINITIONS_VERSION = 1;
+  const SUPPORTED_SCHEMA_VERSIONS = Object.freeze({
+    day: 3,
+    week: 3,
+    all: 3
+  });
 
   /**
    * Canonical metric type contracts + serialized formats stored in day entries.
@@ -42,6 +47,19 @@
 
   const LEGACY_AGGREGATION_MAP = Object.freeze({
     avg: "average"
+  });
+
+  const LEGACY_DAY_V2_TO_METRIC_ID = Object.freeze({
+    "reflection.one_sentence": "one_sentence",
+    "physiology.sleep_hours": "sleep_hours",
+    "physiology.caffeine_drinks": "caffeine_drinks",
+    "physiology.sugar_binge": "sugar_binge",
+    "physiology.movement_20m": "movement_20m",
+    "physiology.weight_optional": "weight_optional",
+    "execution.deep_work_tech": "deep_work_tech",
+    "execution.deep_work_creative": "deep_work_creative",
+    "execution.artifact_technical": "artifact_technical",
+    "execution.artifact_creative": "artifact_creative"
   });
 
   const $ = (id) => document.getElementById(id);
@@ -391,6 +409,44 @@
       .filter((def) => def.metric_id === metricId && isMetricActiveOnDate(def, dayISO))
       .sort((a, b) => b.active_from.localeCompare(a.active_from));
     return defs[0] || null;
+  }
+
+  function toSerializableDefinition(definition) {
+    return {
+      metric_id: definition.metric_id,
+      label: definition.label,
+      type: definition.type,
+      unit: definition.unit ?? null,
+      options: Array.isArray(definition.options) ? definition.options.map((opt) => ({ ...opt })) : null,
+      active_from: definition.active_from,
+      active_to: definition.active_to ?? null,
+      aggregation: definition.aggregation || "none",
+      group: definition.group || null,
+      input_attrs: { ...(definition.input_attrs || {}) }
+    };
+  }
+
+  /**
+   * Snapshot the exact day-scoped metric contracts so exported JSON can be understood offline
+   * even if the local metric definitions change later.
+   */
+  function buildMetricDefinitionSnapshotForDay(dayISO) {
+    return getDefinitionsForDay(dayISO).map((def) => toSerializableDefinition(def));
+  }
+
+  function buildMetricDefinitionSnapshotForRange(startISO, endISO) {
+    const unique = new Map();
+    metricDefinitions.forEach((def) => {
+      const startsBeforeEnd = !def.active_from || def.active_from <= endISO;
+      const endsAfterStart = !def.active_to || def.active_to >= startISO;
+      if (!startsBeforeEnd || !endsAfterStart) return;
+      unique.set(`${def.metric_id}::${def.active_from}`, toSerializableDefinition(def));
+    });
+    return Array.from(unique.values()).sort((a, b) => {
+      const idCmp = a.metric_id.localeCompare(b.metric_id);
+      if (idCmp !== 0) return idCmp;
+      return a.active_from.localeCompare(b.active_from);
+    });
   }
 
   function getMetricValue(entry, metricId, fallback = null) {
@@ -749,7 +805,7 @@
     const structScore = [weekStruct.priorities_defined, weekStruct.two_completed, weekStruct.weekly_review_done].filter(Boolean).length;
 
     return {
-      schema: "accountability_scorecard.week.v2",
+      schema: "accountability_scorecard.week.v3",
       week: {
         start_monday: weekMondayISO,
         end_sunday: toISODate(sunday),
@@ -779,8 +835,14 @@
         .slice()
         .sort((a, b) => (a.entry.day.iso_date).localeCompare(b.entry.day.iso_date))
         .map((d) => d.entry),
+      metric_definitions: {
+        source: "snapshot",
+        definitions: buildMetricDefinitionSnapshotForRange(weekMondayISO, toISODate(sunday)),
+        catalog_version: METRIC_DEFINITIONS_VERSION
+      },
       meta: {
-        exported_at_iso: new Date().toISOString()
+        exported_at_iso: new Date().toISOString(),
+        app_schema_versions: { ...SUPPORTED_SCHEMA_VERSIONS }
       }
     };
   }
@@ -827,9 +889,15 @@
         week_monday: weekIdFromDayISO(dayISO)
       },
       metrics,
+      metric_definitions: {
+        source: "snapshot",
+        definitions: buildMetricDefinitionSnapshotForDay(dayISO),
+        catalog_version: METRIC_DEFINITIONS_VERSION
+      },
       meta: {
         metric_definitions_version: METRIC_DEFINITIONS_VERSION,
-        saved_at_iso: new Date().toISOString()
+        saved_at_iso: new Date().toISOString(),
+        app_schema_versions: { ...SUPPORTED_SCHEMA_VERSIONS }
       }
     };
   }
@@ -1089,6 +1157,36 @@
     setWeekStructure(store, weekMondayISO, st);
   }
 
+  function getPathValue(source, path) {
+    return path.split(".").reduce((acc, key) => (acc == null ? undefined : acc[key]), source);
+  }
+
+  /**
+   * Compatibility bridge for legacy day.v2 records.
+   * Assumption: each legacy field path maps 1:1 to a stable metric_id and never changes meaning.
+   * Fallback: if a legacy field is missing, we emit null/empty defaults so downstream v3 readers stay deterministic.
+   */
+  function mapLegacyDayV2ToMetrics(entry) {
+    const metricDefs = getDefinitionsForDay(entry?.day?.iso_date || currentDayISO());
+    const metricIds = metricDefs.map((def) => def.metric_id);
+
+    const metrics = {};
+    metricIds.forEach((metricId) => {
+      const legacyPath = Object.entries(LEGACY_DAY_V2_TO_METRIC_ID).find(([, id]) => id === metricId)?.[0];
+      const fallbackDef = metricDefs.find((def) => def.metric_id === metricId);
+      const fallbackByType = (type) => {
+        if (type === METRIC_TYPES.NUMBER_INT || type === METRIC_TYPES.NUMBER_FLOAT || type === METRIC_TYPES.SELECT_SINGLE) return null;
+        if (type === METRIC_TYPES.SELECT_MULTI) return [];
+        if (type === METRIC_TYPES.BINARY_YES_NO || type === METRIC_TYPES.BINARY_POS_NEG) return false;
+        return "";
+      };
+      const rawValue = legacyPath ? getPathValue(entry, legacyPath) : undefined;
+      metrics[metricId] = (rawValue === undefined || rawValue === null) ? fallbackByType(fallbackDef?.type) : rawValue;
+    });
+
+    return metrics;
+  }
+
   /**
    * One-time migration from legacy day.v2 shape to day.v3 metric map.
    * Invariants:
@@ -1105,35 +1203,108 @@
     let changed = false;
 
     for (const [dayISO, entry] of Object.entries(migratedStore.days)) {
-      if (!entry || entry.metrics || entry.meta?.migrated_to_metric_map_v3) continue;
+      if (!entry) continue;
 
-      const metrics = {
-        one_sentence: entry.reflection?.one_sentence ?? "",
-        sleep_hours: entry.physiology?.sleep_hours ?? null,
-        caffeine_drinks: entry.physiology?.caffeine_drinks ?? null,
-        sugar_binge: !!entry.physiology?.sugar_binge,
-        movement_20m: !!entry.physiology?.movement_20m,
-        weight_optional: entry.physiology?.weight_optional ?? null,
-        deep_work_tech: entry.execution?.deep_work_tech ?? 0,
-        deep_work_creative: entry.execution?.deep_work_creative ?? 0,
-        artifact_technical: entry.execution?.artifact_technical ?? "",
-        artifact_creative: entry.execution?.artifact_creative ?? ""
-      };
+      const isAlreadyV3 = entry.schema === "accountability_scorecard.day.v3" || !!entry.metrics;
+      if (isAlreadyV3 && entry.metric_definitions) continue;
 
+      if (isAlreadyV3) {
+        migratedStore.days[dayISO] = {
+          ...entry,
+          schema: "accountability_scorecard.day.v3",
+          metric_definitions: entry.metric_definitions || {
+            source: "reference",
+            catalog_version: METRIC_DEFINITIONS_VERSION,
+            reference_key: METRIC_DEFINITIONS_KEY
+          },
+          meta: {
+            ...(entry.meta || {}),
+            app_schema_versions: { ...SUPPORTED_SCHEMA_VERSIONS }
+          }
+        };
+        changed = true;
+        continue;
+      }
+
+      const metrics = mapLegacyDayV2ToMetrics({ ...entry, day: { ...(entry.day || {}), iso_date: dayISO } });
       migratedStore.days[dayISO] = {
         ...entry,
         schema: "accountability_scorecard.day.v3",
         metrics,
+        metric_definitions: {
+          source: "reference",
+          catalog_version: METRIC_DEFINITIONS_VERSION,
+          reference_key: METRIC_DEFINITIONS_KEY
+        },
         meta: {
           ...(entry.meta || {}),
           migrated_to_metric_map_v3: true,
-          migrated_at_iso: new Date().toISOString()
+          migrated_at_iso: new Date().toISOString(),
+          app_schema_versions: { ...SUPPORTED_SCHEMA_VERSIONS }
         }
       };
       changed = true;
     }
 
     return { migratedStore, changed };
+  }
+
+  function parseSchemaDescriptor(schema) {
+    const match = /^accountability_scorecard\.(day|week|all)\.v(\d+)$/.exec(String(schema || ""));
+    if (!match) return null;
+    return { scope: match[1], version: Number(match[2]) };
+  }
+
+  function getUnsupportedSchemaStatus(schemaInfo) {
+    if (!schemaInfo) return "Import failed: schema not recognized.";
+    const maxSupported = SUPPORTED_SCHEMA_VERSIONS[schemaInfo.scope];
+    if (!maxSupported) return `Import failed: unsupported schema group '${schemaInfo.scope}'.`;
+    if (schemaInfo.version > maxSupported) {
+      return `Import failed: unsupported future ${schemaInfo.scope} schema v${schemaInfo.version}. Current max is v${maxSupported}.`;
+    }
+    return `Import failed: unsupported ${schemaInfo.scope} schema v${schemaInfo.version}.`;
+  }
+
+  function normalizeImportedDayEntry(parsedDay) {
+    const dayISO = parsedDay?.day?.iso_date;
+    if (!dayISO) return null;
+
+    if (parsedDay?.schema === "accountability_scorecard.day.v2") {
+      return {
+        ...parsedDay,
+        schema: "accountability_scorecard.day.v3",
+        metrics: mapLegacyDayV2ToMetrics(parsedDay),
+        metric_definitions: {
+          source: "reference",
+          catalog_version: METRIC_DEFINITIONS_VERSION,
+          reference_key: METRIC_DEFINITIONS_KEY
+        },
+        meta: {
+          ...(parsedDay.meta || {}),
+          imported_from_legacy_day_v2: true,
+          imported_at_iso: new Date().toISOString(),
+          app_schema_versions: { ...SUPPORTED_SCHEMA_VERSIONS }
+        }
+      };
+    }
+
+    if (parsedDay?.schema === "accountability_scorecard.day.v3" || parsedDay?.metrics) {
+      return {
+        ...parsedDay,
+        schema: "accountability_scorecard.day.v3",
+        metric_definitions: parsedDay.metric_definitions || {
+          source: "reference",
+          catalog_version: METRIC_DEFINITIONS_VERSION,
+          reference_key: METRIC_DEFINITIONS_KEY
+        },
+        meta: {
+          ...(parsedDay.meta || {}),
+          app_schema_versions: { ...SUPPORTED_SCHEMA_VERSIONS }
+        }
+      };
+    }
+
+    return null;
   }
 
   // --- Events ---
@@ -1211,11 +1382,19 @@
   els.exportAllBtn.addEventListener("click", () => {
     const store = loadStore();
     const payload = {
-      schema: "accountability_scorecard.all.v2",
+      schema: "accountability_scorecard.all.v3",
       exported_at_iso: new Date().toISOString(),
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "local",
+      metric_definitions: {
+        source: "snapshot",
+        catalog_version: METRIC_DEFINITIONS_VERSION,
+        definitions: metricDefinitions.map((def) => toSerializableDefinition(def))
+      },
       days: store.days || {},
-      weeks: store.weeks || {}
+      weeks: store.weeks || {},
+      meta: {
+        app_schema_versions: { ...SUPPORTED_SCHEMA_VERSIONS }
+      }
     };
     downloadJSON("scorecard_all_data.json", payload);
     setStatus("Exported ALL data JSON.");
@@ -1230,47 +1409,62 @@
       const parsed = JSON.parse(text);
       const store = loadStore();
 
-      if (parsed?.schema === "accountability_scorecard.day.v2" && parsed?.day?.iso_date) {
-        store.days[parsed.day.iso_date] = parsed;
-        const { migratedStore } = migrateLegacyDayEntries(store);
-        saveStore(migratedStore);
-        els.dayDate.value = parsed.day.iso_date;
-        loadDayIntoForm();
-        setStatus(`Imported day ${parsed.day.iso_date}.`);
-      } else if ((parsed?.schema === "accountability_scorecard.day.v3" || parsed?.metrics) && parsed?.day?.iso_date) {
-        store.days[parsed.day.iso_date] = parsed;
-        saveStore(store);
-        els.dayDate.value = parsed.day.iso_date;
-        loadDayIntoForm();
-        setStatus(`Imported day ${parsed.day.iso_date}.`);
-      } else if (parsed?.schema === "accountability_scorecard.week.v2" && parsed?.week?.start_monday) {
-        const weekMondayISO = parsed.week.start_monday;
-        if (parsed.summary?.structure) {
-          setWeekStructure(store, weekMondayISO, {
-            priorities_defined: !!parsed.summary.structure.priorities_defined,
-            two_completed: !!parsed.summary.structure.two_completed,
-            weekly_review_done: !!parsed.summary.structure.weekly_review_done
-          });
+      const schemaInfo = parseSchemaDescriptor(parsed?.schema);
+      // Safety gate: never attempt best-effort parsing of future schema versions,
+      // because field semantics may have changed and could silently corrupt local data.
+      if (schemaInfo && schemaInfo.version > SUPPORTED_SCHEMA_VERSIONS[schemaInfo.scope]) {
+        setStatus(getUnsupportedSchemaStatus(schemaInfo));
+      } else if (parsed?.schema === "accountability_scorecard.day.v2" || parsed?.schema === "accountability_scorecard.day.v3" || (parsed?.metrics && parsed?.day?.iso_date)) {
+        const normalizedDay = normalizeImportedDayEntry(parsed);
+        if (!normalizedDay) {
+          setStatus("Import failed: day payload missing required fields.");
+        } else {
+          store.days[normalizedDay.day.iso_date] = normalizedDay;
+          saveStore(store);
+          els.dayDate.value = normalizedDay.day.iso_date;
+          loadDayIntoForm();
+          setStatus(`Imported day ${normalizedDay.day.iso_date}.`);
         }
-        if (Array.isArray(parsed.days)) {
-          for (const d of parsed.days) {
-            if (d?.day?.iso_date) store.days[d.day.iso_date] = d;
+      } else if (parsed?.schema === "accountability_scorecard.week.v2" || parsed?.schema === "accountability_scorecard.week.v3") {
+        const weekMondayISO = parsed?.week?.start_monday;
+        if (!weekMondayISO) {
+          setStatus("Import failed: week payload missing week.start_monday.");
+        } else {
+          if (parsed.summary?.structure) {
+            setWeekStructure(store, weekMondayISO, {
+              priorities_defined: !!parsed.summary.structure.priorities_defined,
+              two_completed: !!parsed.summary.structure.two_completed,
+              weekly_review_done: !!parsed.summary.structure.weekly_review_done
+            });
+          }
+          if (Array.isArray(parsed.days)) {
+            for (const d of parsed.days) {
+              const normalizedDay = normalizeImportedDayEntry(d);
+              if (normalizedDay?.day?.iso_date) {
+                store.days[normalizedDay.day.iso_date] = normalizedDay;
+              }
+            }
+          }
+          const { migratedStore } = migrateLegacyDayEntries(store);
+          saveStore(migratedStore);
+          els.dayDate.value = weekMondayISO;
+          loadDayIntoForm();
+          setStatus(`Imported week ${weekMondayISO}.`);
+        }
+      } else if (parsed?.schema === "accountability_scorecard.all.v2" || parsed?.schema === "accountability_scorecard.all.v3") {
+        for (const [k, v] of Object.entries(parsed.days || {})) {
+          const normalizedDay = normalizeImportedDayEntry(v);
+          if (normalizedDay) {
+            store.days[normalizedDay.day.iso_date || k] = normalizedDay;
           }
         }
-        const { migratedStore } = migrateLegacyDayEntries(store);
-        saveStore(migratedStore);
-        els.dayDate.value = weekMondayISO;
-        loadDayIntoForm();
-        setStatus(`Imported week ${weekMondayISO}.`);
-      } else if (parsed?.schema === "accountability_scorecard.all.v2" && (parsed.days || parsed.weeks)) {
-        for (const [k, v] of Object.entries(parsed.days || {})) store.days[k] = v;
         for (const [k, v] of Object.entries(parsed.weeks || {})) store.weeks[k] = v;
         const { migratedStore } = migrateLegacyDayEntries(store);
         saveStore(migratedStore);
         loadDayIntoForm();
         setStatus("Imported all data and merged.");
       } else {
-        setStatus("Import failed: schema not recognized.");
+        setStatus(getUnsupportedSchemaStatus(schemaInfo));
       }
     } catch {
       setStatus("Import failed: invalid JSON.");
