@@ -21,11 +21,17 @@ A lightweight, browser-based accountability tracker for daily entries and weekly
 3. Start logging a day and click **Save day**.
 
 ## Data model overview
-- **Day schema**: `accountability_scorecard.day.v2`
-- **Week schema**: `accountability_scorecard.week.v2`
-- **All-data schema**: `accountability_scorecard.all.v2`
+- **Day schema**: `accountability_scorecard.day.v3`
+- **Week schema**: `accountability_scorecard.week.v3`
+- **All-data schema**: `accountability_scorecard.all.v3`
 
 Data is stored under the browser key: `accountability_daily_scorecard_v1`.
+
+
+## Schema migration notes (v2 → v3)
+- v3 exports now include a `metric_definitions` block (snapshot or reference metadata) so metric meaning can be reconstructed offline without live app state.
+- Import remains backward compatible with `day.v2`, `week.v2`, and `all.v2`. Legacy day fields are mapped into stable metric IDs in the v3 `metrics` object during import/migration.
+- Import/export paths are version-gated. Unknown future schemas (for example, `*.v4`) are rejected with a clear status message instead of best-effort parsing.
 
 ## Suggested next improvements
 - Add automated tests (unit tests for helpers and integration tests for UI flows).
