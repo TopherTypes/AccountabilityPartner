@@ -1,0 +1,58 @@
+/*
+  Core styles for the Accountability Partner dashboard.
+  Organized by layout, component, and utility classes for easier maintenance.
+*/
+
+:root { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
+    body { margin: 0; background: #0b0c10; color: #e9eef7; }
+    .wrap { max-width: 1100px; margin: 0 auto; padding: 20px; }
+    .card { background: #141824; border: 1px solid #252b3a; border-radius: 12px; padding: 16px; margin: 12px 0; }
+    h1 { font-size: 22px; margin: 0 0 6px; }
+    .sub { opacity: .85; margin: 0 0 14px; }
+    h2 { font-size: 16px; margin: 0 0 10px; }
+    h3 { font-size: 14px; margin: 0 0 8px; opacity: .9; }
+    label { display: block; font-size: 13px; opacity: .9; margin: 10px 0 6px; }
+    input[type="number"], input[type="text"], input[type="date"], textarea {
+      width: 100%; padding: 10px 12px; border-radius: 10px;
+      border: 1px solid #2a3246; background: #0f1320; color: #e9eef7;
+      box-sizing: border-box;
+    }
+    textarea { min-height: 70px; resize: vertical; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+    .row4 { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 12px; }
+    .checks { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-top: 8px; }
+    .check {
+      display: flex; gap: 10px; align-items: center;
+      padding: 10px 12px; border-radius: 10px; border: 1px solid #2a3246; background: #0f1320;
+    }
+    .btns { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; align-items: center; }
+    button {
+      border: 1px solid #2a3246; background: #1b2240; color: #e9eef7;
+      padding: 10px 12px; border-radius: 10px; cursor: pointer;
+    }
+    button:hover { filter: brightness(1.06); }
+    button.danger { background: #3a1b24; }
+    button.ghost { background: transparent; }
+    .muted { opacity: .8; font-size: 13px; }
+    .hr { height: 1px; background: #252b3a; margin: 14px 0; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { padding: 8px 6px; border-bottom: 1px solid #252b3a; text-align: left; }
+    th { opacity: .85; font-weight: 600; }
+    .pill {
+      display: inline-block; padding: 3px 8px; border-radius: 999px; border: 1px solid #2a3246;
+      background: #0f1320; font-size: 12px; white-space: nowrap;
+    }
+    .ok { border-color: #2c6b3f; }
+    .no { border-color: #7a2b2b; }
+    .warn { border-color: #7a6a2b; }
+    .right { text-align: right; }
+    .small { font-size: 12px; opacity: .85; }
+    .footer { opacity: .7; font-size: 12px; margin-top: 10px; }
+    .gridDash { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 10px; }
+    .dashItem { padding: 12px; border-radius: 12px; border: 1px solid #2a3246; background: #0f1320; }
+    .dashK { font-size: 12px; opacity: .8; margin-bottom: 6px; }
+    .dashV { font-size: 20px; font-weight: 700; letter-spacing: .2px; }
+    .dashS { font-size: 12px; opacity: .85; margin-top: 6px; }
+    input[type="file"] { color: #e9eef7; }
+    .twoCols { display: grid; grid-template-columns: 1.2fr .8fr; gap: 12px; }
