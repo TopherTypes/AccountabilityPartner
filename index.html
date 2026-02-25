@@ -25,62 +25,12 @@
           <input id="dayDate" type="date" />
           <div class="small">Pick any day; the dashboard snaps to that week (Mon–Sun).</div>
         </div>
-        <div>
-          <label for="oneSentence">One-sentence reflection</label>
-          <input id="oneSentence" type="text" maxlength="200" placeholder="Concrete: what moved, what leaked, what mattered." />
-        </div>
+        <div class="small">Daily metrics are generated from active metric definitions for the selected date.</div>
       </div>
 
       <div class="hr"></div>
 
-      <h3>Physiology</h3>
-      <div class="row4">
-        <div>
-          <label for="sleepHours">Sleep (hours)</label>
-          <input id="sleepHours" type="number" min="0" max="24" step="0.1" placeholder="e.g., 7.4" />
-        </div>
-        <div>
-          <label for="caffeineDrinks">Caffeine (drinks)</label>
-          <input id="caffeineDrinks" type="number" min="0" max="20" step="0.1" placeholder="e.g., 2" />
-        </div>
-        <div class="check" style="margin-top: 28px;">
-          <input id="sugarBinge" type="checkbox" />
-          <label for="sugarBinge" style="margin:0;">Sugar binge</label>
-        </div>
-        <div class="check" style="margin-top: 28px;">
-          <input id="movement" type="checkbox" />
-          <label for="movement" style="margin:0;">Movement 20+ mins</label>
-        </div>
-      </div>
-
-      <div class="hr"></div>
-
-      <h3>Execution (deep work)</h3>
-      <div class="row3">
-        <div>
-          <label for="dwTech">Deep work sessions (tech)</label>
-          <input id="dwTech" type="number" min="0" max="10" step="1" placeholder="0–10" />
-        </div>
-        <div>
-          <label for="dwCreative">Deep work sessions (creative)</label>
-          <input id="dwCreative" type="number" min="0" max="10" step="1" placeholder="0–10" />
-        </div>
-        <div>
-          <label for="weightOptional">Optional: weight (kg)</label>
-          <input id="weightOptional" type="number" min="0" step="0.1" placeholder="optional" />
-        </div>
-      </div>
-
-      <div class="row" style="margin-top: 6px;">
-        <div>
-          <label for="artifactTech">Artifact (tech)</label>
-          <input id="artifactTech" type="text" maxlength="140" placeholder="e.g., committed input parsing + validation." />
-        </div>
-        <div>
-          <label for="artifactCreative">Artifact (creative)</label>
-          <input id="artifactCreative" type="text" maxlength="140" placeholder="e.g., 600 words; revised Scene 1." />
-        </div>
-      </div>
+      <div id="metricsForm"></div>
 
       <div class="hr"></div>
 
