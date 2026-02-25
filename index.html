@@ -168,6 +168,34 @@
       </table>
     </div>
   </div>
+
+  <div class="card">
+    <h2>Metric management</h2>
+    <p class="muted">Edits create a new version. Remove retires a metric by setting an end date.</p>
+    <div class="row">
+      <div>
+        <label for="metricEffectiveDate">Effective date</label>
+        <input id="metricEffectiveDate" type="date" />
+      </div>
+    </div>
+    <div class="hr"></div>
+    <div style="overflow:auto;">
+      <table id="metricsTable">
+        <thead>
+          <tr>
+            <th>Metric ID</th>
+            <th>Label</th>
+            <th>Type</th>
+            <th>Group</th>
+            <th>Active from</th>
+            <th>Active to</th>
+            <th class="right">Actions</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
 </div>
 
   <script src="app.js" defer></script>
