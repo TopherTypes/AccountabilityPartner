@@ -11,8 +11,15 @@
 <noscript><div class="wrap"><div class="card">This app requires JavaScript to run.</div></div></noscript>
 <div class="wrap">
   <div class="card">
-    <h1>Daily Accountability → Weekly Dashboard</h1>
-    <p class="sub">Daily entry, weekly aggregation, local-only storage, JSON exports.</p>
+    <div class="row settingsHeader">
+      <div>
+        <h1>Daily Accountability → Weekly Dashboard</h1>
+        <p class="sub">Daily entry, weekly aggregation, local-only storage, JSON exports.</p>
+      </div>
+      <div class="settingsButtonWrap">
+        <button id="openSettingsBtn" class="ghost">Settings</button>
+      </div>
+    </div>
     <div class="muted" id="weekLabel"></div>
   </div>
 
@@ -169,33 +176,106 @@
     </div>
   </div>
 
-  <div class="card">
-    <h2>Metric management</h2>
-    <p class="muted">Edits create a new version. Remove retires a metric by setting an end date.</p>
-    <div class="row">
-      <div>
-        <label for="metricEffectiveDate">Effective date</label>
-        <input id="metricEffectiveDate" type="date" />
+  <dialog id="settingsModal" class="settingsModal">
+    <form method="dialog" class="settingsModalCard">
+      <div class="settingsTopBar">
+        <h2>Settings</h2>
+        <button id="closeSettingsBtn" type="submit" class="ghost">Close</button>
       </div>
-    </div>
-    <div class="hr"></div>
-    <div style="overflow:auto;">
-      <table id="metricsTable">
-        <thead>
-          <tr>
-            <th>Metric ID</th>
-            <th>Label</th>
-            <th>Type</th>
-            <th>Group</th>
-            <th>Active from</th>
-            <th>Active to</th>
-            <th class="right">Actions</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-    </div>
-  </div>
+      <div class="settingsTabs" role="tablist" aria-label="Settings tabs">
+        <button type="button" class="tabBtn active" id="generalSettingsTab" data-tab="general">General settings</button>
+        <button type="button" class="tabBtn" id="metricSettingsTab" data-tab="metrics">Metric settings</button>
+      </div>
+
+      <div id="generalSettingsPanel" class="settingsPanel" role="tabpanel" aria-labelledby="generalSettingsTab">
+        <p class="muted">General settings are app-wide behaviors and data portability actions.</p>
+        <div class="small">Tip: data remains local in browser storage unless you export and share JSON manually.</div>
+      </div>
+
+      <div id="metricSettingsPanel" class="settingsPanel hidden" role="tabpanel" aria-labelledby="metricSettingsTab">
+        <p class="muted">Changes are forward-only: edits and removals can only start from today or later, preserving historical records.</p>
+        <div class="row3">
+          <div>
+            <label for="metricEffectiveDate">Effective from</label>
+            <input id="metricEffectiveDate" type="date" />
+          </div>
+          <div>
+            <label for="metricEditorMode">Editor mode</label>
+            <select id="metricEditorMode">
+              <option value="create">Create new metric/version</option>
+              <option value="edit">Edit selected metric/version</option>
+            </select>
+          </div>
+          <div>
+            <label for="metricRetireDate">Remove effective date</label>
+            <input id="metricRetireDate" type="date" />
+          </div>
+        </div>
+
+        <div class="row3">
+          <div>
+            <label for="metricIdInput">Metric ID</label>
+            <input id="metricIdInput" type="text" placeholder="e.g., hydration_liters" />
+          </div>
+          <div>
+            <label for="metricLabelInput">Name</label>
+            <input id="metricLabelInput" type="text" placeholder="Human-readable metric name" />
+          </div>
+          <div>
+            <label for="metricTypeInput">Type of metric</label>
+            <select id="metricTypeInput"></select>
+          </div>
+        </div>
+
+        <div class="row3">
+          <div>
+            <label for="metricGroupInput">Grouping</label>
+            <input id="metricGroupInput" type="text" list="metricGroupList" placeholder="Select or type a new group" />
+            <datalist id="metricGroupList"></datalist>
+          </div>
+          <div>
+            <label for="metricUnitInput">Unit (optional)</label>
+            <input id="metricUnitInput" type="text" placeholder="e.g., hours, sessions" />
+          </div>
+          <div>
+            <label for="metricAggregationInput">Aggregation</label>
+            <select id="metricAggregationInput">
+              <option value="average">average</option>
+              <option value="sum">sum</option>
+              <option value="count_true">count_true</option>
+              <option value="count_selected">count_selected</option>
+              <option value="latest">latest</option>
+              <option value="none">none</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="btns">
+          <button id="saveMetricBtn" type="button">Save metric change</button>
+          <button id="clearMetricEditorBtn" type="button" class="ghost">Clear editor</button>
+          <button id="removeMetricBtn" type="button" class="danger">Remove selected metric</button>
+        </div>
+
+        <div class="hr"></div>
+        <div style="overflow:auto; max-height: 280px;">
+          <table id="metricsTable">
+            <thead>
+              <tr>
+                <th>Metric ID</th>
+                <th>Label</th>
+                <th>Type</th>
+                <th>Group</th>
+                <th>Active from</th>
+                <th>Active to</th>
+                <th class="right">Actions</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </form>
+  </dialog>
 </div>
 
   <script src="app.js" defer></script>

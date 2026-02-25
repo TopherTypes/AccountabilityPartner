@@ -67,6 +67,13 @@
   const els = {
     weekLabel: $("weekLabel"),
     dashWeekRange: $("dashWeekRange"),
+    openSettingsBtn: $("openSettingsBtn"),
+    settingsModal: $("settingsModal"),
+    closeSettingsBtn: $("closeSettingsBtn"),
+    generalSettingsTab: $("generalSettingsTab"),
+    metricSettingsTab: $("metricSettingsTab"),
+    generalSettingsPanel: $("generalSettingsPanel"),
+    metricSettingsPanel: $("metricSettingsPanel"),
 
     dayDate: $("dayDate"),
     metricsForm: $("metricsForm"),
@@ -98,6 +105,18 @@
     dashDays: $("dashDays"),
 
     metricEffectiveDate: $("metricEffectiveDate"),
+    metricRetireDate: $("metricRetireDate"),
+    metricEditorMode: $("metricEditorMode"),
+    metricIdInput: $("metricIdInput"),
+    metricLabelInput: $("metricLabelInput"),
+    metricTypeInput: $("metricTypeInput"),
+    metricGroupInput: $("metricGroupInput"),
+    metricGroupList: $("metricGroupList"),
+    metricUnitInput: $("metricUnitInput"),
+    metricAggregationInput: $("metricAggregationInput"),
+    saveMetricBtn: $("saveMetricBtn"),
+    clearMetricEditorBtn: $("clearMetricEditorBtn"),
+    removeMetricBtn: $("removeMetricBtn"),
     metricsTable: $("metricsTable")?.querySelector("tbody"),
 
     weekDaysTable: $("weekDaysTable").querySelector("tbody"),
@@ -235,6 +254,7 @@
   ]);
 
   let metricDefinitions = loadMetricDefinitions();
+  let selectedMetricVersion = null;
   const metricInputEls = new Map();
 
   function pad(n) { return String(n).padStart(2, "0"); }
@@ -1086,9 +1106,63 @@
     return toISODate(d);
   }
 
+  function populateMetricTypeOptions() {
+    if (!els.metricTypeInput) return;
+    els.metricTypeInput.innerHTML = "";
+    Object.values(METRIC_TYPES).forEach((type) => {
+      const option = document.createElement("option");
+      option.value = type;
+      option.textContent = type;
+      els.metricTypeInput.appendChild(option);
+    });
+  }
+
+  function refreshMetricGroupList() {
+    if (!els.metricGroupList) return;
+    const groups = [...new Set(metricDefinitions.map((def) => String(def.group || "").trim()).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b));
+    els.metricGroupList.innerHTML = "";
+    groups.forEach((groupName) => {
+      const option = document.createElement("option");
+      option.value = groupName;
+      els.metricGroupList.appendChild(option);
+    });
+  }
+
+  function clearMetricEditor() {
+    selectedMetricVersion = null;
+    if (els.metricEditorMode) els.metricEditorMode.value = "create";
+    if (els.metricIdInput) els.metricIdInput.value = "";
+    if (els.metricLabelInput) els.metricLabelInput.value = "";
+    if (els.metricTypeInput) els.metricTypeInput.value = METRIC_TYPES.TEXT_SHORT;
+    if (els.metricGroupInput) els.metricGroupInput.value = "";
+    if (els.metricUnitInput) els.metricUnitInput.value = "";
+    if (els.metricAggregationInput) els.metricAggregationInput.value = "none";
+  }
+
+  function fillMetricEditor(definition) {
+    selectedMetricVersion = { metric_id: definition.metric_id, active_from: definition.active_from };
+    if (els.metricEditorMode) els.metricEditorMode.value = "edit";
+    if (els.metricIdInput) els.metricIdInput.value = definition.metric_id || "";
+    if (els.metricLabelInput) els.metricLabelInput.value = definition.label || "";
+    if (els.metricTypeInput) els.metricTypeInput.value = definition.type || METRIC_TYPES.TEXT_SHORT;
+    if (els.metricGroupInput) els.metricGroupInput.value = definition.group || "";
+    if (els.metricUnitInput) els.metricUnitInput.value = definition.unit || "";
+    if (els.metricAggregationInput) els.metricAggregationInput.value = definition.aggregation || "none";
+  }
+
+  /**
+   * Forward-only guardrail for metric definition changes.
+   * Historical records are immutable: metric contracts can only change from today onward.
+   */
+  function isForwardOnlyDate(isoDate) {
+    return Boolean(isoDate) && isoDate >= currentDayISO();
+  }
+
   function renderMetricManagementTable() {
     if (!els.metricsTable) return;
     els.metricsTable.innerHTML = "";
+    refreshMetricGroupList();
 
     const defs = [...metricDefinitions].sort((a, b) => {
       const idCmp = a.metric_id.localeCompare(b.metric_id);
@@ -1106,7 +1180,7 @@
         <td>${escapeHtml(def.active_from || "—")}</td>
         <td>${escapeHtml(def.active_to || "—")}</td>
         <td class="right">
-          <button class="ghost" data-edit="${escapeHtml(def.metric_id)}" data-from="${escapeHtml(def.active_from || "")}">Edit</button>
+          <button class="ghost" data-load="${escapeHtml(def.metric_id)}" data-from="${escapeHtml(def.active_from || "")}">Load</button>
           <button class="ghost" data-retire="${escapeHtml(def.metric_id)}" data-from="${escapeHtml(def.active_from || "")}">Remove</button>
         </td>
       `;
@@ -1115,9 +1189,13 @@
   }
 
   function saveMetricDefinitionVersion(definition, effectiveFromISO) {
+    if (!isForwardOnlyDate(effectiveFromISO)) {
+      return { ok: false, reason: "Metric changes must be effective today or later." };
+    }
+
     const updatedDefs = metricDefinitions.map((row) => ({ ...row }));
     const previous = updatedDefs
-      .filter((row) => row.metric_id === definition.metric_id && !row.active_to)
+      .filter((row) => row.metric_id === definition.metric_id && !row.active_to && row.active_from <= effectiveFromISO)
       .sort((a, b) => b.active_from.localeCompare(a.active_from))[0];
 
     if (previous) {
@@ -1132,20 +1210,25 @@
 
     metricDefinitions = updatedDefs;
     persistMetricDefinitions(metricDefinitions);
+    return { ok: true };
   }
 
   function retireMetricDefinition(metricId, retireISO) {
+    if (!isForwardOnlyDate(retireISO)) {
+      return { ok: false, reason: "Metric removals must be effective today or later." };
+    }
+
     const updatedDefs = metricDefinitions.map((row) => ({ ...row }));
     const current = updatedDefs
       .filter((row) => row.metric_id === metricId && !row.active_to && row.active_from <= retireISO)
       .sort((a, b) => b.active_from.localeCompare(a.active_from))[0];
-    if (!current) return false;
+    if (!current) return { ok: false, reason: `No active version found for ${metricId} on ${retireISO}.` };
 
     // Soft-retire keeps the row for audit/history and closes its validity window at retire date.
     current.active_to = retireISO;
     metricDefinitions = updatedDefs;
     persistMetricDefinitions(metricDefinitions);
-    return true;
+    return { ok: true };
   }
 
   function setStructureFromCheckboxes(store, weekMondayISO) {
@@ -1473,48 +1556,140 @@
     }
   });
 
-  els.metricEffectiveDate?.addEventListener("change", () => {
-    renderMetricManagementTable();
+  function setSettingsTab(tabKey) {
+    const isGeneral = tabKey === "general";
+    els.generalSettingsPanel?.classList.toggle("hidden", !isGeneral);
+    els.metricSettingsPanel?.classList.toggle("hidden", isGeneral);
+    els.generalSettingsTab?.classList.toggle("active", isGeneral);
+    els.metricSettingsTab?.classList.toggle("active", !isGeneral);
+  }
+
+  function buildMetricDefinitionFromEditor() {
+    const metricId = (els.metricIdInput?.value || "").trim();
+    const label = (els.metricLabelInput?.value || "").trim();
+    const type = els.metricTypeInput?.value || METRIC_TYPES.TEXT_SHORT;
+    const group = (els.metricGroupInput?.value || "").trim() || "Metrics";
+    const unit = (els.metricUnitInput?.value || "").trim() || null;
+    const aggregation = els.metricAggregationInput?.value || "none";
+
+    if (!metricId) return { error: "Metric ID is required." };
+    if (!label) return { error: "Metric name is required." };
+    if (!/^[a-z0-9_]+$/.test(metricId)) {
+      return { error: "Metric ID must contain lowercase letters, numbers, and underscores only." };
+    }
+    if (!SUPPORTED_METRIC_TYPES.has(type)) {
+      return { error: "Metric type is not supported." };
+    }
+
+    const base = selectedMetricVersion
+      ? metricDefinitions.find((def) => def.metric_id === selectedMetricVersion.metric_id && def.active_from === selectedMetricVersion.active_from)
+      : null;
+
+    return {
+      value: {
+        metric_id: metricId,
+        label,
+        type,
+        unit,
+        options: base?.options || null,
+        aggregation,
+        group,
+        input_attrs: { ...(base?.input_attrs || {}) }
+      }
+    };
+  }
+
+  function saveMetricFromEditor() {
+    const effectiveFromISO = els.metricEffectiveDate?.value || currentDayISO();
+    const parsed = buildMetricDefinitionFromEditor();
+    if (parsed.error) {
+      setStatus(parsed.error);
+      return;
+    }
+
+    const result = saveMetricDefinitionVersion(parsed.value, effectiveFromISO);
+    if (!result.ok) {
+      setStatus(result.reason);
+      return;
+    }
+
+    clearMetricEditor();
+    loadDayIntoForm();
+    setStatus(`Saved metric version ${parsed.value.metric_id} effective ${effectiveFromISO}.`);
+  }
+
+  els.openSettingsBtn?.addEventListener("click", () => {
+    els.settingsModal?.showModal();
+  });
+
+  els.generalSettingsTab?.addEventListener("click", () => setSettingsTab("general"));
+  els.metricSettingsTab?.addEventListener("click", () => setSettingsTab("metrics"));
+
+  els.clearMetricEditorBtn?.addEventListener("click", () => {
+    clearMetricEditor();
+    setStatus("Metric editor cleared.");
+  });
+
+  els.saveMetricBtn?.addEventListener("click", saveMetricFromEditor);
+
+  els.removeMetricBtn?.addEventListener("click", () => {
+    const metricId = (els.metricIdInput?.value || "").trim();
+    if (!metricId) {
+      setStatus("Load a metric or enter a Metric ID before removing.");
+      return;
+    }
+
+    const retireISO = els.metricRetireDate?.value || els.metricEffectiveDate?.value || currentDayISO();
+    const result = retireMetricDefinition(metricId, retireISO);
+    if (!result.ok) {
+      setStatus(result.reason);
+      return;
+    }
+
+    clearMetricEditor();
+    loadDayIntoForm();
+    setStatus(`Removed ${metricId} effective ${retireISO}.`);
   });
 
   els.metricsTable?.addEventListener("click", (evt) => {
-    const editBtn = evt.target.closest("button[data-edit]");
-    if (editBtn) {
-      const metricId = editBtn.getAttribute("data-edit");
-      const fromISO = editBtn.getAttribute("data-from");
+    const loadBtn = evt.target.closest("button[data-load]");
+    if (loadBtn) {
+      const metricId = loadBtn.getAttribute("data-load");
+      const fromISO = loadBtn.getAttribute("data-from");
       const base = metricDefinitions.find((def) => def.metric_id === metricId && def.active_from === fromISO);
       if (!base) return;
-
-      const newLabel = window.prompt(`New label for ${metricId}`, base.label);
-      if (newLabel == null) return;
-
-      const effectiveFromISO = els.metricEffectiveDate?.value || els.dayDate.value || currentDayISO();
-      saveMetricDefinitionVersion({ ...base, label: newLabel.trim() || base.label }, effectiveFromISO);
-      loadDayIntoForm();
-      setStatus(`Created new version for ${metricId} effective ${effectiveFromISO}.`);
+      fillMetricEditor(base);
+      setStatus(`Loaded ${metricId} (${fromISO}) into editor.`);
       return;
     }
 
     const retireBtn = evt.target.closest("button[data-retire]");
-    if (retireBtn) {
-      const metricId = retireBtn.getAttribute("data-retire");
-      const retireISO = els.metricEffectiveDate?.value || els.dayDate.value || currentDayISO();
-      const ok = retireMetricDefinition(metricId, retireISO);
-      if (!ok) {
-        setStatus(`No active version found for ${metricId} on ${retireISO}.`);
-        return;
-      }
-      loadDayIntoForm();
-      setStatus(`Retired ${metricId} as of ${retireISO}.`);
+    if (!retireBtn) return;
+
+    const metricId = retireBtn.getAttribute("data-retire");
+    const retireISO = els.metricRetireDate?.value || els.metricEffectiveDate?.value || currentDayISO();
+    const result = retireMetricDefinition(metricId, retireISO);
+    if (!result.ok) {
+      setStatus(result.reason);
+      return;
     }
+    clearMetricEditor();
+    loadDayIntoForm();
+    setStatus(`Removed ${metricId} effective ${retireISO}.`);
   });
 
   // --- Init ---
   const todayISO = currentDayISO();
   els.dayDate.value = todayISO;
   if (els.metricEffectiveDate) els.metricEffectiveDate.value = todayISO;
+  if (els.metricRetireDate) els.metricRetireDate.value = todayISO;
+  if (els.metricEffectiveDate) els.metricEffectiveDate.min = todayISO;
+  if (els.metricRetireDate) els.metricRetireDate.min = todayISO;
   setDaySavedPill(false);
 
+  populateMetricTypeOptions();
+  clearMetricEditor();
+  setSettingsTab("general");
   renderMetricFields(todayISO);
   renderMetricManagementTable();
   loadDayIntoForm();
