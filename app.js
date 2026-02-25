@@ -7,6 +7,43 @@
   const STORAGE_KEY = "accountability_daily_scorecard_v1";
   const METRIC_DEFINITIONS_KEY = "store.metric_definitions";
   const METRIC_DEFINITIONS_VERSION = 1;
+
+  /**
+   * Canonical metric type contracts + serialized formats stored in day entries.
+   * - number_int: JSON number (integer) or null.
+   * - number_float: JSON number (float/integer) or null.
+   * - binary_yes_no: JSON boolean.
+   * - binary_pos_neg: JSON boolean.
+   * - text_short: JSON string (trimmed, short-form).
+   * - text_long: JSON string (trimmed, long-form).
+   * - select_single: JSON string option value, or null when unselected.
+   * - select_multi: JSON array<string> option values.
+   */
+  const METRIC_TYPES = Object.freeze({
+    NUMBER_INT: "number_int",
+    NUMBER_FLOAT: "number_float",
+    BINARY_YES_NO: "binary_yes_no",
+    BINARY_POS_NEG: "binary_pos_neg",
+    TEXT_SHORT: "text_short",
+    TEXT_LONG: "text_long",
+    SELECT_SINGLE: "select_single",
+    SELECT_MULTI: "select_multi"
+  });
+
+  const SUPPORTED_METRIC_TYPES = new Set(Object.values(METRIC_TYPES));
+
+  const LEGACY_METRIC_TYPE_MAP = Object.freeze({
+    integer: METRIC_TYPES.NUMBER_INT,
+    number: METRIC_TYPES.NUMBER_FLOAT,
+    boolean: METRIC_TYPES.BINARY_YES_NO,
+    text: METRIC_TYPES.TEXT_SHORT,
+    select: METRIC_TYPES.SELECT_SINGLE
+  });
+
+  const LEGACY_AGGREGATION_MAP = Object.freeze({
+    avg: "average"
+  });
+
   const $ = (id) => document.getElementById(id);
 
   const els = {
@@ -53,14 +90,14 @@
    * Metric definition shape invariants:
    * - metric_id is stable and never repurposed for a different meaning.
    * - active_from / active_to are inclusive ISO dates used for date-scoped rendering.
-   * - aggregation is metadata used by weekly summaries (avg, sum, count_true, latest, none).
+   * - aggregation is metadata used by weekly summaries (average, sum, count_true, count_selected, latest, none).
    * - options is only populated for select-type metrics.
    */
   const DEFAULT_METRIC_DEFINITIONS = Object.freeze([
     {
       metric_id: "one_sentence",
       label: "One-sentence reflection",
-      type: "text",
+      type: METRIC_TYPES.TEXT_LONG,
       unit: null,
       options: null,
       active_from: "2024-01-01",
@@ -72,31 +109,31 @@
     {
       metric_id: "sleep_hours",
       label: "Sleep",
-      type: "number",
+      type: METRIC_TYPES.NUMBER_FLOAT,
       unit: "hours",
       options: null,
       active_from: "2024-01-01",
       active_to: null,
-      aggregation: "avg",
+      aggregation: "average",
       group: "Physiology",
       input_attrs: { min: 0, max: 24, step: 0.1, placeholder: "e.g., 7.4" }
     },
     {
       metric_id: "caffeine_drinks",
       label: "Caffeine",
-      type: "number",
+      type: METRIC_TYPES.NUMBER_FLOAT,
       unit: "drinks",
       options: null,
       active_from: "2024-01-01",
       active_to: null,
-      aggregation: "avg",
+      aggregation: "average",
       group: "Physiology",
       input_attrs: { min: 0, max: 20, step: 0.1, placeholder: "e.g., 2" }
     },
     {
       metric_id: "sugar_binge",
       label: "Sugar binge",
-      type: "boolean",
+      type: METRIC_TYPES.BINARY_YES_NO,
       unit: null,
       options: null,
       active_from: "2024-01-01",
@@ -108,7 +145,7 @@
     {
       metric_id: "movement_20m",
       label: "Movement 20+ mins",
-      type: "boolean",
+      type: METRIC_TYPES.BINARY_YES_NO,
       unit: null,
       options: null,
       active_from: "2024-01-01",
@@ -120,7 +157,7 @@
     {
       metric_id: "deep_work_tech",
       label: "Deep work sessions (tech)",
-      type: "integer",
+      type: METRIC_TYPES.NUMBER_INT,
       unit: "sessions",
       options: null,
       active_from: "2024-01-01",
@@ -132,7 +169,7 @@
     {
       metric_id: "deep_work_creative",
       label: "Deep work sessions (creative)",
-      type: "integer",
+      type: METRIC_TYPES.NUMBER_INT,
       unit: "sessions",
       options: null,
       active_from: "2024-01-01",
@@ -144,7 +181,7 @@
     {
       metric_id: "weight_optional",
       label: "Optional: weight",
-      type: "number",
+      type: METRIC_TYPES.NUMBER_FLOAT,
       unit: "kg",
       options: null,
       active_from: "2024-01-01",
@@ -156,7 +193,7 @@
     {
       metric_id: "artifact_technical",
       label: "Artifact (tech)",
-      type: "text",
+      type: METRIC_TYPES.TEXT_SHORT,
       unit: null,
       options: null,
       active_from: "2024-01-01",
@@ -168,7 +205,7 @@
     {
       metric_id: "artifact_creative",
       label: "Artifact (creative)",
-      type: "text",
+      type: METRIC_TYPES.TEXT_SHORT,
       unit: null,
       options: null,
       active_from: "2024-01-01",
@@ -219,7 +256,7 @@
   function setStatus(msg) { els.status.textContent = msg; }
 
   function numOrNull(v) { if (v === "" || v == null) return null; const n = Number(v); return Number.isFinite(n) ? n : null; }
-  function intOrNull(v) { if (v === "" || v == null) return null; const n = Number(v); return Number.isFinite(n) ? Math.trunc(n) : null; }
+  function intOrNull(v) { if (v === "" || v == null) return null; const n = Number(v); return Number.isInteger(n) ? n : null; }
 
   function valOrEmpty(v) { return (v === null || v === undefined || Number.isNaN(v)) ? "" : String(v); }
 
@@ -285,6 +322,27 @@
     let changed = false;
     const normalized = definitions.map((def) => {
       const next = { ...def };
+      const normalizedType = LEGACY_METRIC_TYPE_MAP[next.type] || next.type;
+      if (normalizedType !== next.type) {
+        next.type = normalizedType;
+        changed = true;
+      }
+      if (!SUPPORTED_METRIC_TYPES.has(next.type)) {
+        next.type = METRIC_TYPES.TEXT_SHORT;
+        changed = true;
+      }
+      const normalizedAggregation = LEGACY_AGGREGATION_MAP[next.aggregation] || next.aggregation || "none";
+      if (normalizedAggregation !== next.aggregation) {
+        next.aggregation = normalizedAggregation;
+        changed = true;
+      }
+      if (!next.input_attrs || typeof next.input_attrs !== "object") {
+        next.input_attrs = {};
+        changed = true;
+      }
+      if (!Array.isArray(next.options)) {
+        next.options = null;
+      }
       if (!next.active_from) {
         next.active_from = "2024-01-01";
         changed = true;
@@ -369,48 +427,7 @@
       grid.className = "row";
 
       for (const def of groupDefs) {
-        const wrap = document.createElement("div");
-        const inputId = `metric_${def.metric_id}`;
-
-        if (def.type === "boolean") {
-          wrap.className = "check";
-          const input = document.createElement("input");
-          input.type = "checkbox";
-          input.id = inputId;
-          wrap.appendChild(input);
-
-          const label = document.createElement("label");
-          label.setAttribute("for", inputId);
-          label.style.margin = "0";
-          label.textContent = def.label;
-          wrap.appendChild(label);
-          metricInputEls.set(def.metric_id, input);
-        } else {
-          const label = document.createElement("label");
-          label.setAttribute("for", inputId);
-          label.textContent = def.unit ? `${def.label} (${def.unit})` : def.label;
-          wrap.appendChild(label);
-
-          let input;
-          if (def.type === "select") {
-            input = document.createElement("select");
-            (def.options || []).forEach((opt) => {
-              const option = document.createElement("option");
-              option.value = opt.value;
-              option.textContent = opt.label;
-              input.appendChild(option);
-            });
-          } else {
-            input = document.createElement("input");
-            input.type = (def.type === "number" || def.type === "integer") ? "number" : "text";
-          }
-
-          input.id = inputId;
-          Object.entries(def.input_attrs || {}).forEach(([k, v]) => input.setAttribute(k, String(v)));
-          wrap.appendChild(input);
-          metricInputEls.set(def.metric_id, input);
-        }
-
+        const wrap = createMetricControl(def);
         grid.appendChild(wrap);
       }
 
@@ -419,19 +436,267 @@
     }
   }
 
+  function metricLabel(definition) {
+    return definition.unit ? `${definition.label} (${definition.unit})` : definition.label;
+  }
+
+  function createMetricControl(definition) {
+    const inputId = `metric_${definition.metric_id}`;
+    const wrap = document.createElement("div");
+    const attrs = definition.input_attrs || {};
+
+    const applyAttrs = (el) => {
+      Object.entries(attrs).forEach(([k, v]) => {
+        if (k === "required" && typeof v === "boolean") {
+          if (v) el.setAttribute("required", "required");
+          return;
+        }
+        el.setAttribute(k, String(v));
+      });
+    };
+
+    const createLabel = (text) => {
+      const label = document.createElement("label");
+      label.setAttribute("for", inputId);
+      label.textContent = text;
+      return label;
+    };
+
+    const binaryLabel = definition.type === METRIC_TYPES.BINARY_POS_NEG ? "Positive / Negative" : "Yes / No";
+
+    let input;
+    switch (definition.type) {
+      case METRIC_TYPES.BINARY_YES_NO:
+      case METRIC_TYPES.BINARY_POS_NEG: {
+        wrap.className = "check";
+        input = document.createElement("input");
+        input.type = "checkbox";
+        input.id = inputId;
+        wrap.appendChild(input);
+
+        const label = createLabel(definition.label);
+        label.style.margin = "0";
+        wrap.appendChild(label);
+
+        const hint = document.createElement("span");
+        hint.className = "small muted";
+        hint.textContent = binaryLabel;
+        wrap.appendChild(hint);
+        break;
+      }
+      case METRIC_TYPES.NUMBER_INT:
+      case METRIC_TYPES.NUMBER_FLOAT:
+      case METRIC_TYPES.TEXT_SHORT: {
+        wrap.appendChild(createLabel(metricLabel(definition)));
+        input = document.createElement("input");
+        input.type = (definition.type === METRIC_TYPES.TEXT_SHORT) ? "text" : "number";
+        input.id = inputId;
+        applyAttrs(input);
+        wrap.appendChild(input);
+        break;
+      }
+      case METRIC_TYPES.TEXT_LONG: {
+        wrap.appendChild(createLabel(metricLabel(definition)));
+        input = document.createElement("textarea");
+        input.id = inputId;
+        input.rows = 3;
+        applyAttrs(input);
+        wrap.appendChild(input);
+        break;
+      }
+      case METRIC_TYPES.SELECT_SINGLE: {
+        wrap.appendChild(createLabel(metricLabel(definition)));
+        input = document.createElement("select");
+        input.id = inputId;
+        const placeholder = document.createElement("option");
+        placeholder.value = "";
+        placeholder.textContent = "Select…";
+        input.appendChild(placeholder);
+        (definition.options || []).forEach((opt) => {
+          const option = document.createElement("option");
+          option.value = String(opt.value);
+          option.textContent = opt.label;
+          input.appendChild(option);
+        });
+        applyAttrs(input);
+        wrap.appendChild(input);
+        break;
+      }
+      case METRIC_TYPES.SELECT_MULTI: {
+        wrap.appendChild(createLabel(metricLabel(definition)));
+        input = document.createElement("select");
+        input.id = inputId;
+        input.multiple = true;
+        input.size = Math.min(Math.max((definition.options || []).length, 2), 6);
+        (definition.options || []).forEach((opt) => {
+          const option = document.createElement("option");
+          option.value = String(opt.value);
+          option.textContent = opt.label;
+          input.appendChild(option);
+        });
+        applyAttrs(input);
+        wrap.appendChild(input);
+        break;
+      }
+      default: {
+        wrap.appendChild(createLabel(metricLabel(definition)));
+        input = document.createElement("input");
+        input.type = "text";
+        input.id = inputId;
+        applyAttrs(input);
+        wrap.appendChild(input);
+      }
+    }
+
+    metricInputEls.set(definition.metric_id, input);
+    return wrap;
+  }
+
+  /**
+   * Parse UI control -> normalized metric value according to the metric contract.
+   */
   function readMetricInputValue(definition, inputEl) {
-    if (definition.type === "boolean") return !!inputEl.checked;
-    if (definition.type === "integer") return intOrNull(inputEl.value) ?? 0;
-    if (definition.type === "number") return numOrNull(inputEl.value);
-    return (inputEl.value || "").trim();
+    switch (definition.type) {
+      case METRIC_TYPES.BINARY_YES_NO:
+      case METRIC_TYPES.BINARY_POS_NEG:
+        return !!inputEl.checked;
+      case METRIC_TYPES.NUMBER_INT:
+        return intOrNull(inputEl.value);
+      case METRIC_TYPES.NUMBER_FLOAT:
+        return numOrNull(inputEl.value);
+      case METRIC_TYPES.TEXT_SHORT:
+      case METRIC_TYPES.TEXT_LONG:
+        return (inputEl.value || "").trim();
+      case METRIC_TYPES.SELECT_SINGLE:
+        return (inputEl.value || "").trim() || null;
+      case METRIC_TYPES.SELECT_MULTI:
+        return Array.from(inputEl.selectedOptions || []).map((opt) => opt.value);
+      default:
+        return (inputEl.value || "").trim();
+    }
   }
 
   function writeMetricInputValue(definition, inputEl, value) {
-    if (definition.type === "boolean") {
-      inputEl.checked = !!value;
-      return;
+    switch (definition.type) {
+      case METRIC_TYPES.BINARY_YES_NO:
+      case METRIC_TYPES.BINARY_POS_NEG:
+        inputEl.checked = !!value;
+        return;
+      case METRIC_TYPES.SELECT_MULTI: {
+        const values = new Set(Array.isArray(value) ? value.map(String) : []);
+        Array.from(inputEl.options || []).forEach((opt) => {
+          opt.selected = values.has(opt.value);
+        });
+        return;
+      }
+      default:
+        inputEl.value = valOrEmpty(value);
     }
-    inputEl.value = valOrEmpty(value);
+  }
+
+  function isRequiredMetric(definition) {
+    const required = definition.input_attrs?.required;
+    return required === true || required === "true" || required === "required";
+  }
+
+  function isStepAligned(value, min, step) {
+    const base = Number.isFinite(min) ? min : 0;
+    const ratio = (value - base) / step;
+    return Math.abs(ratio - Math.round(ratio)) < 1e-9;
+  }
+
+  function validateMetricValue(definition, value) {
+    const attrs = definition.input_attrs || {};
+    const required = isRequiredMetric(definition);
+
+    if (required) {
+      if (value === null || value === undefined || value === "" || (Array.isArray(value) && value.length === 0)) {
+        return `${definition.label} is required.`;
+      }
+    }
+
+    switch (definition.type) {
+      case METRIC_TYPES.NUMBER_INT:
+      case METRIC_TYPES.NUMBER_FLOAT: {
+        if (value === null || value === undefined || value === "") return null;
+        if (!Number.isFinite(value)) return `${definition.label} must be a number.`;
+        if (definition.type === METRIC_TYPES.NUMBER_INT && !Number.isInteger(value)) {
+          return `${definition.label} must be an integer.`;
+        }
+        const min = numOrNull(attrs.min);
+        const max = numOrNull(attrs.max);
+        const step = numOrNull(attrs.step);
+        if (min !== null && value < min) return `${definition.label} must be at least ${min}.`;
+        if (max !== null && value > max) return `${definition.label} must be at most ${max}.`;
+        if (step !== null && step > 0 && !isStepAligned(value, min, step)) {
+          return `${definition.label} must follow step ${step}.`;
+        }
+        return null;
+      }
+      case METRIC_TYPES.BINARY_YES_NO:
+      case METRIC_TYPES.BINARY_POS_NEG:
+        return (typeof value === "boolean") ? null : `${definition.label} must be true/false.`;
+      case METRIC_TYPES.TEXT_SHORT:
+      case METRIC_TYPES.TEXT_LONG: {
+        if (value === null || value === undefined) return null;
+        if (typeof value !== "string") return `${definition.label} must be text.`;
+        const maxLength = intOrNull(attrs.maxlength);
+        if (maxLength !== null && value.length > maxLength) {
+          return `${definition.label} must be at most ${maxLength} characters.`;
+        }
+        return null;
+      }
+      case METRIC_TYPES.SELECT_SINGLE: {
+        if (value === null || value === undefined || value === "") return null;
+        const optionValues = new Set((definition.options || []).map((opt) => String(opt.value)));
+        return optionValues.has(String(value)) ? null : `${definition.label} must be a valid option.`;
+      }
+      case METRIC_TYPES.SELECT_MULTI: {
+        if (value == null) return null;
+        if (!Array.isArray(value)) return `${definition.label} must be an array of options.`;
+        const optionValues = new Set((definition.options || []).map((opt) => String(opt.value)));
+        const invalid = value.find((item) => !optionValues.has(String(item)));
+        return invalid === undefined ? null : `${definition.label} includes an invalid option.`;
+      }
+      default:
+        return null;
+    }
+  }
+
+  function aggregateMetricValues(aggregation, values) {
+    const nonNull = values.filter((v) => v !== null && v !== undefined && v !== "");
+    switch (aggregation) {
+      case "average": {
+        const nums = nonNull.filter((v) => Number.isFinite(v));
+        return {
+          value: nums.length ? (nums.reduce((a, b) => a + b, 0) / nums.length) : null,
+          value_count: nums.length
+        };
+      }
+      case "sum": {
+        const nums = nonNull.filter((v) => Number.isFinite(v));
+        return {
+          value: nums.reduce((a, b) => a + b, 0),
+          value_count: nums.length
+        };
+      }
+      case "count_true": {
+        const trues = values.filter((v) => v === true).length;
+        return { value: trues, value_count: values.length };
+      }
+      case "count_selected": {
+        const selected = values.reduce((acc, v) => {
+          if (Array.isArray(v)) return acc + v.length;
+          return (v === null || v === undefined || v === "") ? acc : acc + 1;
+        }, 0);
+        return { value: selected, value_count: values.length };
+      }
+      case "latest":
+        return { value: nonNull.length ? nonNull[nonNull.length - 1] : null, value_count: nonNull.length };
+      case "none":
+      default:
+        return { value: null, value_count: nonNull.length };
+    }
   }
 
   function computeWeekSummary(store, weekMondayISO) {
@@ -447,28 +712,34 @@
       if (entry) days.push({ iso, entry });
     }
 
-    // Weekly summaries are date-resolved per day so historical totals don't drift when definitions change later.
-    const metricValueIfActive = (dayObj, metricId, fallback) => {
-      const effectiveDef = getDefinitionForMetricOnDate(metricId, dayObj.iso);
-      if (!effectiveDef) return fallback;
-      return getMetricValue(dayObj.entry, metricId, fallback);
-    };
+    const metricBuckets = new Map();
+    days
+      .slice()
+      .sort((a, b) => a.iso.localeCompare(b.iso))
+      .forEach((dayObj) => {
+        const defs = getDefinitionsForDay(dayObj.iso);
+        defs.forEach((def) => {
+          const bucket = metricBuckets.get(def.metric_id) || { definition: def, values: [] };
+          bucket.definition = def;
+          bucket.values.push(getMetricValue(dayObj.entry, def.metric_id, null));
+          metricBuckets.set(def.metric_id, bucket);
+        });
+      });
 
-    const sleepVals = days
-      .map((d) => metricValueIfActive(d, "sleep_hours", null))
-      .filter((v) => v !== null && v !== undefined);
-    const caffVals = days
-      .map((d) => metricValueIfActive(d, "caffeine_drinks", null))
-      .filter((v) => v !== null && v !== undefined);
+    const metricAggregates = {};
+    metricBuckets.forEach((bucket, metricId) => {
+      metricAggregates[metricId] = {
+        aggregation: bucket.definition.aggregation || "none",
+        ...aggregateMetricValues(bucket.definition.aggregation || "none", bucket.values)
+      };
+    });
 
-    const avg = (arr) => arr.length ? (arr.reduce((a, b) => a + b, 0) / arr.length) : null;
-    const sum = (arr) => arr.reduce((a, b) => a + b, 0);
-
-    const sugarDays = days.filter((d) => !!metricValueIfActive(d, "sugar_binge", false)).length;
-    const moveDays = days.filter((d) => !!metricValueIfActive(d, "movement_20m", false)).length;
-
-    const dwTechTotal = sum(days.map((d) => metricValueIfActive(d, "deep_work_tech", 0) ?? 0));
-    const dwCreatTotal = sum(days.map((d) => metricValueIfActive(d, "deep_work_creative", 0) ?? 0));
+    const sleepAgg = metricAggregates.sleep_hours || { value: null, value_count: 0 };
+    const caffAgg = metricAggregates.caffeine_drinks || { value: null, value_count: 0 };
+    const sugarAgg = metricAggregates.sugar_binge || { value: 0 };
+    const moveAgg = metricAggregates.movement_20m || { value: 0 };
+    const dwTechAgg = metricAggregates.deep_work_tech || { value: 0 };
+    const dwCreatAgg = metricAggregates.deep_work_creative || { value: 0 };
 
     const weekStruct = store.weeks[weekMondayISO]?.structure ?? {
       priorities_defined: false,
@@ -486,17 +757,18 @@
       },
       summary: {
         days_logged: days.length,
+        metrics: metricAggregates,
         physiology: {
-          sleep_avg_hours: avg(sleepVals),
-          sleep_days_logged: sleepVals.length,
-          caffeine_avg_drinks: avg(caffVals),
-          caffeine_days_logged: caffVals.length,
-          sugar_binge_days: sugarDays,
-          movement_days: moveDays
+          sleep_avg_hours: sleepAgg.value,
+          sleep_days_logged: sleepAgg.value_count || 0,
+          caffeine_avg_drinks: caffAgg.value,
+          caffeine_days_logged: caffAgg.value_count || 0,
+          sugar_binge_days: sugarAgg.value || 0,
+          movement_days: moveAgg.value || 0
         },
         execution: {
-          deep_work_sessions_technical_total: dwTechTotal,
-          deep_work_sessions_creative_total: dwCreatTotal
+          deep_work_sessions_technical_total: dwTechAgg.value || 0,
+          deep_work_sessions_creative_total: dwCreatAgg.value || 0
         },
         structure: {
           ...weekStruct,
@@ -530,8 +802,10 @@
     for (const def of getDefinitionsForDay(els.dayDate.value || currentDayISO())) {
       const input = metricInputEls.get(def.metric_id);
       if (!input) continue;
-      if (def.type === "boolean") input.checked = false;
-      else input.value = "";
+      writeMetricInputValue(def, input, def.type === METRIC_TYPES.SELECT_MULTI ? [] : null);
+      if (def.type === METRIC_TYPES.TEXT_SHORT || def.type === METRIC_TYPES.TEXT_LONG) {
+        input.value = "";
+      }
     }
     if (!keepDate) els.dayDate.value = "";
     setDaySavedPill(false);
@@ -699,15 +973,12 @@
   }
 
   function validateDay(entry) {
-    const sh = getMetricValue(entry, "sleep_hours", null);
-    const cf = getMetricValue(entry, "caffeine_drinks", null);
-    const dwT = getMetricValue(entry, "deep_work_tech", 0);
-    const dwC = getMetricValue(entry, "deep_work_creative", 0);
-
-    if (sh !== null && (sh < 0 || sh > 24)) return "Sleep hours must be 0–24.";
-    if (cf !== null && (cf < 0 || cf > 20)) return "Caffeine drinks must be 0–20.";
-    if (dwT < 0 || dwT > 10) return "Deep work tech must be 0–10.";
-    if (dwC < 0 || dwC > 10) return "Deep work creative must be 0–10.";
+    const defs = getDefinitionsForDay(entry.day.iso_date);
+    for (const def of defs) {
+      const value = getMetricValue(entry, def.metric_id, null);
+      const err = validateMetricValue(def, value);
+      if (err) return err;
+    }
     return null;
   }
 
